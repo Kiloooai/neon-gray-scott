@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Gray-Scott</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+            color: #0ff;
+            text-shadow: 0 0 5px #0ff;
+            cursor: crosshair;
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(0,255,255,0.3);
+            backdrop-filter: blur(5px);
+            z-index: 100;
+            user-select: none;
+            width: 220px;
+        }
+
+        .controls h2 {
+            margin-bottom: 12px;
+            font-size: 16px;
+            color: #f0f;
+            text-shadow: 0 0 10px #f0f;
+        }
+
+        .control-group {
+            margin-bottom: 10px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 10px;
+            color: #ff0;
+            margin-bottom: 4px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: #0ff;
+        }
+
+        .value-display {
+            float: right;
+            color: #fff;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        button {
+            flex: 1;
+            padding: 8px;
+            background: transparent;
+            border: 1px solid #0ff;
+            color: #0ff;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: rgba(0,255,255,0.1);
+            box-shadow: 0 0 10px rgba(0,255,255,0.3);
+        }
+
+        .stats {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #0f0;
+            text-shadow: 0 0 8px #0f0;
+            font-size: 12px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(0,255,0,0.3);
+        }
+
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #888;
+            font-size: 12px;
+            text-align: center;
+            max-width: 500px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div class="controls">
+        <h2>🧪 NEON GRAY-SCOTT</h2>
+
+        <div class="control-group">
+            <label>Feed (F) <span class="value-display" id="feedVal">0.055</span></label>
+            <input type="range" id="feed" min="0.01" max="0.1" step="0.001" value="0.055">
+        </div>
+
+        <div class="control-group">
+            <label>Kill (k) <span class="value-display" id="killVal">0.062</span></label>
+            <input type="range" id="kill" min="0.03" max="0.07" step="0.001" value="0.062">
+        </div>
+
+        <div class="control-group">
+            <label>Diffusion U (Du) <span class="value-display" id="duVal">0.2</span></label>
+            <input type="range" id="du" min="0.1" max="0.5" step="0.01" value="0.2">
+        </div>
+
+        <div class="control-group">
+            <label>Diffusion V (Dv) <span class="value-display" id="dvVal">0.1</span></label>
+            <input type="range" id="dv" min="0.05" max="0.25" step="0.005" value="0.1">
+        </div>
+
+        <div class="control-group">
+            <label>Brush Size <span class="value-display" id="brushVal">3</span></label>
+            <input type="range" id="brush" min="1" max="8" value="3">
+        </div>
+
+        <div class="buttons">
+            <button id="pauseBtn">Pause</button>
+            <button id="resetBtn">Reset</button>
+        </div>
+
+        <div class="buttons">
+            <button id="randomBtn">Random Params</button>
+        </div>
+    </div>
+
+    <div class="stats">
+        <div>Time Step: <span id="step">0</span></div>
+        <div>FPS: <span id="fps">60</span></div>
+    </div>
+
+    <div class="instructions">
+        Click or drag to inject chemical V • Adjust feed/kill to change pattern behavior • Watch self-organization emerge • Diffusion-reaction system.
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Controls
+        const feedSlider = document.getElementById('feed');
+        const killSlider = document.getElementById('kill');
+        const duSlider = document.getElementById('du');
+        const dvSlider = document.getElementById('dv');
+        const brushSlider = document.getElementById('brush');
+
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const randomBtn = document.getElementById('randomBtn');
+
+        let width, height;
+        let gridW = 100, gridH = 100;
+        let U, V, nextU, nextV;
+        let paused = false;
+        let stepCount = 0;
+        let lastTime = 0;
+        let frameCount = 0;
+        let lastFpsTime = 0;
+        let imgData;
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            initGrid();
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        function initGrid() {
+            U = new Float32Array(gridW * gridH);
+            V = new Float32Array(gridW * gridH);
+            nextU = new Float32Array(gridW * gridH);
+            nextV = new Float32Array(gridW * gridH);
+            // Initialize: U=1 everywhere, V=0 except a small seed region in center
+            for (let i = 0; i < gridW*gridH; i++) {
+                U[i] = 1.0;
+                V[i] = 0.0;
+            }
+            const cx = Math.floor(gridW/2), cy = Math.floor(gridH/2);
+            const seedRadius = 4;
+            for (let y = cy - seedRadius; y <= cy + seedRadius; y++) {
+                for (let x = cx - seedRadius; x <= cx + seedRadius; x++) {
+                    if (x>=0 && x<gridW && y>=0 && y<gridH) {
+                        V[y*gridW + x] = 1.0;
+                    }
+                }
+            }
+            stepCount = 0;
+        }
+
+        // Precompute neighbor indices for 4-neighbor Laplacian
+        function idx(x, y) {
+            // wrap around toroidal
+            if (x < 0) x = gridW - 1;
+            if (x >= gridW) x = 0;
+            if (y < 0) y = gridH - 1;
+            if (y >= gridH) y = 0;
+            return y * gridW + x;
+        }
+
+        function updateReactionDiffusion() {
+            const F = parseFloat(feedSlider.value);
+            const k = parseFloat(killSlider.value);
+            const Du = parseFloat(duSlider.value);
+            const Dv = parseFloat(dvSlider.value);
+
+            // Compute Laplacian and update
+            for (let y = 0; y < gridH; y++) {
+                for (let x = 0; x < gridW; x++) {
+                    const i = y * gridW + x;
+                    const u = U[i];
+                    const v = V[i];
+
+                    // 4-neighbor Laplacian
+                    const uN = U[idx(x, y-1)];
+                    const uS = U[idx(x, y+1)];
+                    const uW = U[idx(x-1, y)];
+                    const uE = U[idx(x+1, y)];
+                    const uCenter = u;
+                    const lapU = (uN + uS + uW + uE - 4*uCenter);
+
+                    const vN = V[idx(x, y-1)];
+                    const vS = V[idx(x+1, y)];
+                    const vW = V[idx(x-1, y)];
+                    const vE = V[idx(x, y+1)];
+                    const lapV = (vN + vS + vW + vE - 4*v);
+
+                    // Gray-Scott equations
+                    const uvv = u * v * v;
+                    let newU = u + Du * lapU - uvv + F * (1 - u);
+                    let newV = v + Dv * lapV + uvv - (F + k) * v;
+
+                    // Clamp to [0,1]
+                    if (newU < 0) newU = 0;
+                    if (newU > 1) newU = 1;
+                    if (newV < 0) newV = 0;
+                    if (newV > 1) newV = 1;
+
+                    nextU[i] = newU;
+                    nextV[i] = newV;
+                }
+            }
+
+            // Swap buffers
+            const tempU = U; U = nextU; nextU = tempU;
+            const tempV = V; V = nextV; nextV = tempV;
+
+            stepCount++;
+        }
+
+        function draw() {
+            // Create image data from grid
+            if (!imgData) {
+                imgData = ctx.createImageData(gridW, gridH);
+            }
+            const data = imgData.data;
+
+            for (let i = 0; i < gridW*gridH; i++) {
+                const v = V[i];
+                // Map V to color: low = black, high = neon color (cyan-ish)
+                // Use a simple map: V from 0..1 -> intensity
+                const intensity = Math.floor(v * 255);
+                const idx = i * 4;
+                // Color scheme: neon cyan (0,255,255) with intensity; or maybe gradient
+                // Let's use a hue shift based on V? Could use hue from 180 (cyan) to 120 (green) or 300 (magenta)
+                // Simpler: use a color ramp: black -> blue -> cyan -> white?
+                // We'll do: low = black, mid = cyan (0,255,255), high = white
+                if (intensity < 20) {
+                    data[idx] = 0; data[idx+1] = 0; data[idx+2] = 0; data[idx+3] = 255;
+                } else if (intensity < 128) {
+                    const t = intensity / 128;
+                    data[idx] = 0;
+                    data[idx+1] = Math.floor(255 * t);
+                    data[idx+2] = Math.floor(255 * t);
+                    data[idx+3] = 255;
+                } else {
+                    const t = (intensity - 128) / 127;
+                    data[idx] = Math.floor(255 * t);
+                    data[idx+1] = 255;
+                    data[idx+2] = 255;
+                    data[idx+3] = 255;
+                }
+            }
+
+            // Put image data to an offscreen canvas or directly to main? We'll put to main but scale
+            // Create a temporary canvas to draw the image data scaled up
+            // Approach: use putImageData on a small canvas then drawImage scaled? Actually easier: use ctx.putImageData then use ctx.imageSmoothingEnabled = false and draw to fill?
+            // But we want to display the grid stretched to full screen. We'll use an offscreen canvas to render the pixel art and then draw it scaled without smoothing.
+            if (!this.smallCanvas) {
+                this.smallCanvas = document.createElement('canvas');
+                this.smallCanvas.width = gridW;
+                this.smallCanvas.height = gridH;
+                this.smallCtx = this.smallCanvas.getContext('2d');
+            }
+            this.smallCtx.putImageData(imgData, 0, 0);
+            // Clear main and draw scaled
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            ctx.imageSmoothingEnabled = false;
+            // Draw scaled to cover full canvas, maintain aspect ratio? Fill entire screen, stretch
+            ctx.drawImage(this.smallCanvas, 0, 0, width, height);
+        }
+
+        function animate(timestamp) {
+            const delta = timestamp - lastTime || 16;
+            lastTime = timestamp;
+
+            frameCount++;
+            if (timestamp - lastFpsTime >= 1000) {
+                document.getElementById('fps').textContent = frameCount;
+                frameCount = 0;
+                lastFpsTime = timestamp;
+            }
+
+            if (!paused) {
+                updateReactionDiffusion();
+                draw();
+                document.getElementById('step').textContent = stepCount;
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        // Mouse interaction: add V chemical
+        function addChemical(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+            const gridX = Math.floor((x / width) * gridW);
+            const gridY = Math.floor((y / height) * gridH);
+            const brush = parseInt(brushSlider.value);
+            for (let dy = -brush; dy <= brush; dy++) {
+                for (let dx = -brush; dx <= brush; dx++) {
+                    const gx = gridX + dx, gy = gridY + dy;
+                    if (gx >= 0 && gx < gridW && gy >= 0 && gy < gridH) {
+                        V[gy*gridW + gx] = 1.0;
+                    }
+                }
+            }
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            addChemical(e.clientX, e.clientY);
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (e.buttons === 1) { // left button held
+                addChemical(e.clientX, e.clientY);
+            }
+        });
+
+        // UI
+        function updateDisplays() {
+            document.getElementById('feedVal').textContent = feedSlider.value;
+            document.getElementById('killVal').textContent = killSlider.value;
+            document.getElementById('duVal').textContent = duSlider.value;
+            document.getElementById('dvVal').textContent = dvSlider.value;
+            document.getElementById('brushVal').textContent = brushSlider.value;
+        }
+
+        [feedSlider, killSlider, duSlider, dvSlider, brushSlider].forEach(s => {
+            s.addEventListener('input', updateDisplays);
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            paused = !paused;
+            pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+        });
+
+        resetBtn.addEventListener('click', () => {
+            initGrid();
+            draw();
+        });
+
+        randomBtn.addEventListener('click', () => {
+            feedSlider.value = (0.02 + Math.random() * 0.08).toFixed(3);
+            killSlider.value = (0.03 + Math.random() * 0.04).toFixed(3);
+            duSlider.value = (0.1 + Math.random() * 0.4).toFixed(2);
+            dvSlider.value = (0.05 + Math.random() * 0.2).toFixed(3);
+            updateDisplays();
+            initGrid();
+            draw();
+        });
+
+        updateDisplays();
+        initGrid();
+        animate(0);
+    </script>
+</body>
+</html>
